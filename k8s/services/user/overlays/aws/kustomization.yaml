@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+images:
+  - name: user-image
+    newName: ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/user
+    newTag: v1.0.0
+
+configMapGenerator:
+  - name: user-config
+    namespace: apps
+    literals:
+      - CLOUD_PROVIDER=aws
+      - SERVICE_NAME=user
+
+patches:
+  - path: serviceaccount-patch.yaml

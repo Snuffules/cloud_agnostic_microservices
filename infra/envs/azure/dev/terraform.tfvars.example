@@ -1,0 +1,11 @@
+location            = "westeurope"
+resource_group_name = "rg-cloud-agnostic-dev"
+cluster_name        = "cloud-agnostic-dev"
+acr_name            = "youruniqueacrname"
+services            = ["checkout", "payment", "inventory", "user"]
+istio_version       = "1.24.2"
+
+tags = {
+  project = "cloud-agnostic"
+  env     = "dev"
+}

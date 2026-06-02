@@ -1,0 +1,7 @@
+project_id   = "your-gcp-project-id"
+region       = "europe-west1"
+cluster_name = "cloud-agnostic-dev"
+node_count   = 2
+machine_type = "e2-standard-4"
+services     = ["checkout", "payment", "inventory", "user"]
+istio_version = "1.24.2"

@@ -1,0 +1,13 @@
+apiVersion: networking.istio.io/v1
+kind: Sidecar
+metadata:
+  name: checkout
+  namespace: apps
+spec:
+  workloadSelector:
+    labels:
+      app.kubernetes.io/name: checkout
+  egress:
+    - hosts:
+        - "./*"
+        - "istio-system/*"

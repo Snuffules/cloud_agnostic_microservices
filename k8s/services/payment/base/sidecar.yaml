@@ -1,0 +1,13 @@
+apiVersion: networking.istio.io/v1
+kind: Sidecar
+metadata:
+  name: payment
+  namespace: apps
+spec:
+  workloadSelector:
+    labels:
+      app.kubernetes.io/name: payment
+  egress:
+    - hosts:
+        - "./*"
+        - "istio-system/*"

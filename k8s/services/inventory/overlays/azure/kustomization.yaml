@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+images:
+  - name: inventory-image
+    newName: ACR_NAME.azurecr.io/inventory
+    newTag: v1.0.0
+
+configMapGenerator:
+  - name: inventory-config
+    namespace: apps
+    literals:
+      - CLOUD_PROVIDER=azure
+      - SERVICE_NAME=inventory
+
+patches:
+  - path: serviceaccount-patch.yaml
+  - path: deployment-patch.yaml
