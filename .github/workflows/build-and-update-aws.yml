@@ -1,0 +1,107 @@
+name: Build Images and Update AWS Kustomize Tags
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/**"
+      - "scripts/update-image-tag.py"
+      - ".github/workflows/build-and-update-aws.yml"
+
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service name to build, or all"
+        required: true
+        default: "all"
+
+permissions:
+  contents: write
+
+env:
+  AWS_REGION: eu-west-1
+  AWS_ACCOUNT_ID: "123456789012"
+  CLOUD: aws
+
+jobs:
+  build-and-update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect services
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.service }}" != "all" ]]; then
+            echo "${{ inputs.service }}" > /tmp/services.txt
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            git diff --name-only HEAD^ HEAD 2>/dev/null \
+              | awk -F/ '/^apps\/[^\/]+\// {print $2}' \
+              | sort -u > /tmp/services.txt || true
+          else
+            find apps -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort > /tmp/services.txt
+          fi
+
+          if [[ ! -s /tmp/services.txt ]]; then
+            echo "No changed services detected."
+            exit 0
+          fi
+
+          cat /tmp/services.txt
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        shell: bash
+        run: |
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+          docker login --username AWS --password-stdin \
+          ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+
+      - name: Build, push, and update Kustomize tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          while read -r service; do
+            [[ -z "$service" ]] && continue
+
+            image="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${service}:${{ github.sha }}"
+
+            docker build -t "$image" "./apps/${service}"
+            docker push "$image"
+
+            python scripts/update-image-tag.py \
+              --service "$service" \
+              --cloud "${{ env.CLOUD }}" \
+              --new-tag "${{ github.sha }}"
+          done < /tmp/services.txt
+
+      - name: Commit Kustomize tag updates
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet; then
+            echo "No manifest changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add k8s/services/*/overlays/${{ env.CLOUD }}/kustomization.yaml
+          git commit -m "chore(aws): update image tags to ${{ github.sha }}"
+          git push

@@ -1,0 +1,103 @@
+name: Build Images and Update GCP Kustomize Tags
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/**"
+      - "scripts/update-image-tag.py"
+      - ".github/workflows/build-and-update-gcp.yml"
+
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service name to build, or all"
+        required: true
+        default: "all"
+
+permissions:
+  contents: write
+
+env:
+  PROJECT_ID: your-gcp-project-id
+  REGION: us
+  REPOSITORY: apps
+  CLOUD: gcp
+
+jobs:
+  build-and-update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect services
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.service }}" != "all" ]]; then
+            echo "${{ inputs.service }}" > /tmp/services.txt
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            git diff --name-only HEAD^ HEAD 2>/dev/null \
+              | awk -F/ '/^apps\/[^\/]+\// {print $2}' \
+              | sort -u > /tmp/services.txt || true
+          else
+            find apps -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort > /tmp/services.txt
+          fi
+
+          if [[ ! -s /tmp/services.txt ]]; then
+            echo "No changed services detected."
+            exit 0
+          fi
+
+          cat /tmp/services.txt
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build, push, and update Kustomize tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          while read -r service; do
+            [[ -z "$service" ]] && continue
+
+            image="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${service}:${{ github.sha }}"
+
+            docker build -t "$image" "./apps/${service}"
+            docker push "$image"
+
+            python scripts/update-image-tag.py \
+              --service "$service" \
+              --cloud "${{ env.CLOUD }}" \
+              --new-tag "${{ github.sha }}"
+          done < /tmp/services.txt
+
+      - name: Commit Kustomize tag updates
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet; then
+            echo "No manifest changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add k8s/services/*/overlays/${{ env.CLOUD }}/kustomization.yaml
+          git commit -m "chore(gcp): update image tags to ${{ github.sha }}"
+          git push

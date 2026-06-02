@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: services-azure
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+        - service: checkout
+        - service: payment
+        - service: inventory
+        - service: user
+
+  template:
+    metadata:
+      name: "{{service}}-azure"
+      namespace: argocd
+    spec:
+      project: apps
+
+      source:
+        repoURL: https://github.com/Snuffules/cloud_agnostic_microservices.git
+        targetRevision: main
+        path: k8s/services/{{service}}/overlays/azure
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: apps
+
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
